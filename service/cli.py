@@ -199,11 +199,13 @@ def missing_reviews(send_email: str, test_email: str):
             console.print("[yellow]Email sending cancelled.[/yellow]")
             return
 
+        sender_name = click.prompt("Your name (for email signature)")
         password = click.prompt("Email password (app password)", hide_input=True)
         console.print("[blue]Sending reminder emails...[/blue]")
         from .email_sender import send_reminder_emails
         email_results = send_reminder_emails(
             sender_email=send_email,
+            sender_name=sender_name,
             password=password,
             missing_entries=missing,
             test_email=test_email,

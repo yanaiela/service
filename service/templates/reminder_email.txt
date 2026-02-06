@@ -1,0 +1,10 @@
+Dear {reviewer_name},
+
+I am reaching out about a paper for which I'm serving as an area chair (AC), and you are a reviewer.
+The paper is called "{paper_title}"
+
+The review deadline has passed, and I need to ensure the paper receives at least 3 reviews.
+Are you able to submit a review for this paper in the next day or two?
+
+Best,
+{sender_name}

@@ -4,6 +4,7 @@ SMTP email sender for review reminder emails.
 
 import smtplib
 from email.mime.text import MIMEText
+from pathlib import Path
 
 SMTP_SERVERS = {
     "gmail.com": ("smtp.gmail.com", 587),
@@ -21,7 +22,7 @@ def _get_smtp_server(email: str):
     return (f"smtp.{domain}", 587)
 
 
-def send_reminder_emails(sender_email, password, missing_entries, test_email=None):
+def send_reminder_emails(sender_email, sender_name, password, missing_entries, test_email=None):
     """
     Send reminder emails via SMTP.
 
@@ -38,27 +39,16 @@ def send_reminder_emails(sender_email, password, missing_entries, test_email=Non
     except Exception as e:
         return [(entry["reviewer_email"], False, f"SMTP login failed: {e}") for entry in missing_entries]
 
+    template_path = Path(__file__).parent / "templates" / "reminder_email.txt"
+    template = template_path.read_text()
+
     for entry in missing_entries:
         recipient = test_email if test_email else entry["reviewer_email"]
         subject = f"Review reminder: {entry['paper_title']}"
-        body = (
-            f"Dear {entry['reviewer_name']},\n"
-            f"\n"
-            f"\n"
-            f"I am reaching out about a paper for which I'm serving as an area chair (AC), "
-            f"and you are a reviewer.\n"
-            f"\n"
-            f"The paper is called \"{entry['paper_title']}\"\n"
-            f"\n"
-            f"\n"
-            f"The review deadline has passed, and I need to ensure the paper receives at least 3 reviews.\n"
-            f"\n"
-            f"Are you able to submit a review for this paper in the next day or two?\n"
-            f"\n"
-            f"\n"
-            f"Best,\n"
-            f"\n"
-            f"Yanai"
+        body = template.format(
+            reviewer_name=entry["reviewer_name"],
+            paper_title=entry["paper_title"],
+            sender_name=sender_name,
         )
 
         msg = MIMEText(body)
