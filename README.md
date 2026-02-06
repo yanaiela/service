@@ -85,7 +85,7 @@ Each issue is assigned a short code for quick identification:
 ## Installation
 
 ```bash
-pip install -e .
+uv sync
 ```
 
 ## Usage
@@ -94,27 +94,17 @@ pip install -e .
 
 ```bash
 # Check a single PDF
-service check-pdf path/to/paper.pdf
+uv run service check-pdf path/to/paper.pdf
 
 # Check all PDFs in a directory
-service check-pdf path/to/directory/
+uv run service check-pdf path/to/directory/
 
 # Specify paper type (short/long)
-service check-pdf path/to/paper.pdf --type short
-service check-pdf path/to/paper.pdf --type long
+uv run service check-pdf path/to/paper.pdf --type short
+uv run service check-pdf path/to/paper.pdf --type long
 
 # Output results as JSON
-service check-pdf path/to/directory/ --json
-```
-
-### Alternative Usage (Python Module)
-
-```bash
-# Using python -m syntax
-python -m service.cli check-pdf data/
-
-# Check specific file
-python -m service.cli check-pdf data/paper.pdf --type long
+uv run service check-pdf path/to/directory/ --json
 ```
 
 ### Example Output
@@ -134,6 +124,74 @@ python -m service.cli check-pdf data/paper.pdf --type long
 ┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━┩
 │ paper.pdf            │ long │    10 │             9 │  FAIL  │ LEN,REF │
 └──────────────────────┴──────┴───────┴───────────────┴────────┴─────────┘
+```
+
+### Missing Reviews Checker
+
+Finds reviewers who haven't submitted their reviews for papers you're assigned to as Area Chair on OpenReview.
+
+#### Setup
+
+Set your OpenReview credentials as environment variables:
+
+```bash
+export OPENREVIEW_USERNAME="your-email@example.com"
+export OPENREVIEW_PASSWORD="your-password"
+```
+
+#### Usage
+
+```bash
+# List missing reviews
+service missing-reviews
+
+# Send reminder emails to reviewers from your email
+service missing-reviews --send-email you@gmail.com
+
+# Test email sending (all emails go to your address)
+service missing-reviews --send-email you@gmail.com --test-email you@gmail.com
+```
+
+The command will:
+1. Authenticate with OpenReview
+2. List all venues where you are an Area Chair (newest first)
+3. Prompt you to select a venue
+4. Display a table of reviewers with missing reviews, including paper number, title, reviewer name, and reviewer email
+
+#### Sending Reminder Emails
+
+Use `--send-email <your-email>` to send reminder emails to reviewers who haven't submitted their reviews. Emails are sent via SMTP from your personal email address. You will be prompted for your email password (app password) at runtime.
+
+Supported email providers (auto-detected from domain):
+- Gmail (`smtp.gmail.com`)
+- Outlook/Hotmail (`smtp-mail.outlook.com`)
+- Yahoo (`smtp.mail.yahoo.com`)
+- Other domains fall back to `smtp.<domain>:587`
+
+For Gmail, you need to use an [App Password](https://myaccount.google.com/apppasswords) instead of your regular password.
+
+Use `--test-email <address>` alongside `--send-email` to redirect all emails to a test address. The email content will still use the real reviewer names and paper titles, but delivery goes to the test address only.
+
+#### Example Output
+
+```
+Logged in as: ~First_Last1
+
+Your Area Chair venues:
+  1. aclweb.org/ACL/ARR/2026/January
+  2. aclweb.org/ACL/ARR/2025/October
+  ...
+
+Select a venue: 1
+
+                       Missing Reviews
+┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Paper # ┃ Paper Title               ┃ Reviewer Name   ┃ Reviewer Email       ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
+│    1234 │ Example Paper Title       │ Jane Doe        │ reviewer@example.com │
+└─────────┴───────────────────────────┴─────────────────┴──────────────────────┘
+
+Total missing reviews: 1
 ```
 
 ## Page Counting Logic
@@ -156,12 +214,12 @@ The tool uses sophisticated logic to determine content pages:
 ## Development
 
 ```bash
-# Install in development mode
-pip install -e .
+# Install dependencies
+uv sync
 
 # Run tests
-python -m pytest
+uv run pytest
 
 # Check specific files during development
-python -m service.cli check-pdf test_files/
+uv run service check-pdf test_files/
 ```

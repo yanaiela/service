@@ -9,6 +9,8 @@ from typing import Optional
 import click
 from rich.console import Console
 
+from rich.table import Table
+
 from .pdf_checker import PDFChecker, PaperType
 
 
@@ -98,6 +100,124 @@ def check_pdf(path: str, paper_type: str, output: Optional[str], quiet: bool):
     if output:
         save_results_to_file(results, output)
         console.print(f"[green]Results saved to {output}[/green]")
+
+
+@main.command("missing-reviews")
+@click.option(
+    "--send-email",
+    type=str,
+    default=None,
+    help="Send reminder emails from this email address (e.g. you@gmail.com).",
+)
+@click.option(
+    "--test-email",
+    type=str,
+    default=None,
+    help="Send all emails to this address instead of the actual reviewers (for testing).",
+)
+def missing_reviews(send_email: str, test_email: str):
+    """Find reviewers with missing reviews for your AC papers."""
+    from .openreview_client import (
+        get_client,
+        get_area_chair_venues,
+        get_ac_paper_assignments,
+        get_missing_reviews,
+    )
+
+    # 1. Authenticate
+    try:
+        client = get_client()
+    except RuntimeError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort()
+
+    # 2. Get user profile
+    profile = client.get_profile()
+    user_id = profile.id
+    console.print(f"[blue]Logged in as: {user_id}[/blue]")
+
+    # 3. Discover AC venues
+    venues = get_area_chair_venues(client, user_id)
+    if not venues:
+        console.print("[yellow]No Area Chair venues found for your account.[/yellow]")
+        return
+
+    console.print("\n[bold]Your Area Chair venues:[/bold]")
+    for i, v in enumerate(venues, 1):
+        console.print(f"  {i}. {v['venue_id']}")
+
+    choice = click.prompt(
+        "\nSelect a venue",
+        type=click.IntRange(1, len(venues)),
+    )
+    selected = venues[choice - 1]
+    venue_id = selected["venue_id"]
+    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
+
+    # 4. Fetch AC paper assignments
+    console.print("[blue]Fetching paper assignments...[/blue]")
+    paper_ids = get_ac_paper_assignments(client, venue_id, user_id)
+    if not paper_ids:
+        console.print("[yellow]No papers assigned to you as AC in this venue.[/yellow]")
+        return
+    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
+
+    # 5. Find missing reviews
+    console.print("[blue]Checking for missing reviews...[/blue]")
+    missing = get_missing_reviews(client, venue_id, paper_ids)
+
+    # 6. Display results
+    if not missing:
+        console.print("[green]All reviewers have submitted their reviews![/green]")
+        return
+
+    table = Table(title="Missing Reviews")
+    table.add_column("Paper #", style="cyan", justify="right")
+    table.add_column("Paper Title", style="white")
+    table.add_column("Reviewer Name", style="yellow")
+    table.add_column("Reviewer Email", style="red")
+
+    for entry in missing:
+        table.add_row(
+            str(entry["paper_number"]),
+            entry["paper_title"],
+            entry["reviewer_name"],
+            entry["reviewer_email"],
+        )
+
+    console.print(table)
+    console.print(f"\n[red]Total missing reviews: {len(missing)}[/red]")
+
+    if test_email and not send_email:
+        console.print("[red]Error: --test-email requires --send-email.[/red]")
+        raise click.Abort()
+
+    if send_email:
+        if test_email:
+            console.print(f"\n[yellow]TEST MODE: all emails will be sent to {test_email}[/yellow]")
+        if not click.confirm("\nSend reminder emails to all listed reviewers?"):
+            console.print("[yellow]Email sending cancelled.[/yellow]")
+            return
+
+        password = click.prompt("Email password (app password)", hide_input=True)
+        console.print("[blue]Sending reminder emails...[/blue]")
+        from .email_sender import send_reminder_emails
+        email_results = send_reminder_emails(
+            sender_email=send_email,
+            password=password,
+            missing_entries=missing,
+            test_email=test_email,
+        )
+        for result in email_results:
+            target = result[0]
+            success = result[1]
+            if success:
+                console.print(f"  [green]Sent to {target}[/green]")
+            else:
+                error = result[2] if len(result) > 2 else "Unknown error"
+                console.print(f"  [red]Failed to send to {target}: {error}[/red]")
+        console.print("[blue]Done.[/blue]")
+
 
 
 def save_results_to_file(results, output_path: str):
