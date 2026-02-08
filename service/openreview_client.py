@@ -59,6 +59,30 @@ def get_ac_paper_assignments(client, venue_id, user_id):
     return [edge.head for edge in edges]
 
 
+def _get_profile_email(profile):
+    """Get the best available unmasked email from a profile, or None."""
+    if not hasattr(profile, "content") or not isinstance(profile.content, dict):
+        return None
+    content = profile.content
+
+    # 1. preferredEmail (populated by with_preferred_emails edges, or set directly)
+    pref = content.get("preferredEmail")
+    if pref and "*" not in pref and "@" in pref:
+        return pref
+
+    # 2. emailsConfirmed — unmasked confirmed emails available in API v2
+    for e in content.get("emailsConfirmed", []):
+        if isinstance(e, str) and "*" not in e and "@" in e:
+            return e
+
+    # 3. emails list — pick the first unmasked one
+    for e in content.get("emails", []):
+        if isinstance(e, str) and "*" not in e and "@" in e:
+            return e
+
+    return None
+
+
 def get_missing_reviews(client, venue_id, paper_ids):
     """
     For each paper, find reviewers who haven't submitted reviews.
@@ -149,29 +173,49 @@ def get_missing_reviews(client, venue_id, paper_ids):
     name_map = {}
     if all_missing_reviewer_ids:
         unique_ids = list(set(all_missing_reviewer_ids))
-        profiles = openreview.tools.get_profiles(client, unique_ids)
+
+        # Try fetching profiles with preferred emails from venue edges
+        try:
+            profiles = openreview.tools.get_profiles(
+                client, unique_ids,
+                with_preferred_emails=f"{venue_id}/-/Preferred_Emails",
+            )
+        except Exception:
+            profiles = openreview.tools.get_profiles(client, unique_ids)
+
+        needs_individual_fetch = []
         for profile in profiles:
-            email = None
+            email = _get_profile_email(profile)
             name = None
-            if hasattr(profile, "content"):
-                content = profile.content
-                if isinstance(content, dict):
-                    email = content.get("preferredEmail")
-                    if not email:
-                        emails = content.get("emails", [])
-                        if emails:
-                            email = emails[0]
-                    names = content.get("names", [])
-                    if names:
-                        n = names[0]
-                        if isinstance(n, dict):
-                            first = n.get("first", "")
-                            last = n.get("last", "")
-                            name = f"{first} {last}".strip()
+            if hasattr(profile, "content") and isinstance(profile.content, dict):
+                names = profile.content.get("names", [])
+                if names:
+                    n = names[0]
+                    if isinstance(n, dict):
+                        first = n.get("first", "")
+                        last = n.get("last", "")
+                        name = f"{first} {last}".strip()
             if not email:
-                email = profile.id
-            email_map[profile.id] = email
+                needs_individual_fetch.append(profile.id)
+            email_map[profile.id] = email or profile.id
             name_map[profile.id] = name or profile.id
+
+        # For profiles without emails, try individual fetch (may return
+        # fuller data for authenticated ACs)
+        for pid in needs_individual_fetch:
+            try:
+                full_profile = client.get_profile(pid)
+                email = _get_profile_email(full_profile)
+                if email:
+                    email_map[pid] = email
+            except Exception:
+                pass
+
+        # Map original input IDs that are emails (keys above are tilde IDs)
+        for uid in unique_ids:
+            if uid not in email_map and "@" in uid:
+                email_map[uid] = uid
+                name_map[uid] = uid
 
     for entry in paper_missing:
         rid = entry["reviewer_id"]

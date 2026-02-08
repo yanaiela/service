@@ -44,6 +44,9 @@ def send_reminder_emails(sender_email, sender_name, password, missing_entries, t
 
     for entry in missing_entries:
         recipient = test_email if test_email else entry["reviewer_email"]
+        if "*" in recipient or "@" not in recipient:
+            results.append((recipient, False, "No valid email address available (masked or missing)"))
+            continue
         subject = f"Review reminder: {entry['paper_title']}"
         body = template.format(
             reviewer_name=entry["reviewer_name"],
