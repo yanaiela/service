@@ -156,7 +156,7 @@ The command will:
 1. Authenticate with OpenReview
 2. List all venues where you are an Area Chair (newest first)
 3. Prompt you to select a venue
-4. Display a table of reviewers with missing reviews, including paper number, title, reviewer name, and reviewer email
+4. Display a table of reviewers with missing reviews, including paper number, title, OpenReview link, reviewer name, and reviewer email
 
 #### Sending Reminder Emails
 
@@ -184,12 +184,12 @@ Your Area Chair venues:
 
 Select a venue: 1
 
-                       Missing Reviews
-┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Paper # ┃ Paper Title               ┃ Reviewer Name   ┃ Reviewer Email       ┃
-┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
-│    1234 │ Example Paper Title       │ Jane Doe        │ reviewer@example.com │
-└─────────┴───────────────────────────┴─────────────────┴──────────────────────┘
+                                        Missing Reviews
+┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Paper # ┃ Paper Title         ┃ OpenReview Link                           ┃ Reviewer Name   ┃ Reviewer Email       ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
+│    1234 │ Example Paper Title │ https://openreview.net/forum?id=abc123XYZ │ Jane Doe        │ reviewer@example.com │
+└─────────┴─────────────────────┴───────────────────────────────────────────┴─────────────────┴──────────────────────┘
 
 Total missing reviews: 1
 ```
