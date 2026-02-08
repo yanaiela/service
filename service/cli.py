@@ -200,6 +200,9 @@ def missing_reviews(send_email: str, test_email: str):
     if send_email:
         if test_email:
             console.print(f"\n[yellow]TEST MODE: all emails will be sent to {test_email}[/yellow]")
+        emergency_count = sum(1 for e in missing if e.get("flag") == "Emergency")
+        if emergency_count:
+            console.print(f"[yellow]Note: {emergency_count} reviewer(s) declared emergency and will NOT be emailed.[/yellow]")
         if not click.confirm("\nSend reminder emails to all listed reviewers?"):
             console.print("[yellow]Email sending cancelled.[/yellow]")
             return
@@ -222,7 +225,10 @@ def missing_reviews(send_email: str, test_email: str):
                 console.print(f"  [green]Sent to {target}[/green]")
             else:
                 error = result[2] if len(result) > 2 else "Unknown error"
-                console.print(f"  [red]Failed to send to {target}: {error}[/red]")
+                if "emergency" in error.lower():
+                    console.print(f"  [yellow]Skipped {target}: reviewer declared emergency[/yellow]")
+                else:
+                    console.print(f"  [red]Failed to send to {target}: {error}[/red]")
         console.print("[blue]Done.[/blue]")
 
 

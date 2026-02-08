@@ -43,6 +43,9 @@ def send_reminder_emails(sender_email, sender_name, password, missing_entries, t
     template = template_path.read_text()
 
     for entry in missing_entries:
+        if entry.get("flag") == "Emergency":
+            results.append((entry["reviewer_email"], False, "Skipped: reviewer declared emergency"))
+            continue
         recipient = test_email if test_email else entry["reviewer_email"]
         if "*" in recipient or "@" not in recipient:
             results.append((recipient, False, "No valid email address available (masked or missing)"))
