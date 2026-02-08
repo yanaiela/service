@@ -107,6 +107,19 @@ def get_missing_reviews(client, venue_id, paper_ids):
             if ag.members:
                 anon_to_profile[ag.id] = ag.members[0]
 
+        # Find emergency declarations
+        emergency_profiles = set()
+        for n in all_notes:
+            inv = getattr(n, "invitation", None) or ""
+            invs = getattr(n, "invitations", None) or []
+            all_invs = invs + ([inv] if inv else [])
+            if any(
+                re.search(r"/-/Emergency_Declaration$", i) for i in all_invs
+            ):
+                for sig in n.signatures:
+                    if sig in anon_to_profile:
+                        emergency_profiles.add(anon_to_profile[sig])
+
         # Find which profile IDs have submitted reviews
         reviewed_profiles = set()
         for review in review_notes:
@@ -126,6 +139,7 @@ def get_missing_reviews(client, venue_id, paper_ids):
                     "paper_number": number,
                     "paper_id": paper_id,
                     "reviewer_id": rid,
+                    "flag": "Emergency" if rid in emergency_profiles else "",
                 }
             )
             all_missing_reviewer_ids.append(rid)

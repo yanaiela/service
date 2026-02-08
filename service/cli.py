@@ -177,6 +177,7 @@ def missing_reviews(send_email: str, test_email: str):
     table.add_column("OpenReview Link", style="blue")
     table.add_column("Reviewer Name", style="yellow")
     table.add_column("Reviewer Email", style="red")
+    table.add_column("Flag", style="bright_red")
 
     for entry in missing:
         link = f"https://openreview.net/forum?id={entry['paper_id']}"
@@ -186,6 +187,7 @@ def missing_reviews(send_email: str, test_email: str):
             link,
             entry["reviewer_name"],
             entry["reviewer_email"],
+            entry["flag"],
         )
 
     console.print(table)
