@@ -150,6 +150,12 @@ service missing-reviews --send-email you@gmail.com
 
 # Test email sending (all emails go to your address)
 service missing-reviews --send-email you@gmail.com --test-email you@gmail.com
+
+# Post a private comment on each paper's forum (visible to SACs/PCs/ACs)
+service missing-reviews --post-comment
+
+# Combine email reminders with forum comments
+service missing-reviews --send-email you@gmail.com --post-comment
 ```
 
 The command will:
@@ -157,6 +163,7 @@ The command will:
 2. List all venues where you are an Area Chair (newest first)
 3. Prompt you to select a venue
 4. Display a table of reviewers with missing reviews, including paper number, title, OpenReview link, reviewer name, reviewer email, and an emergency flag if the reviewer posted an Emergency Declaration
+5. Optionally post a private comment on each paper's forum (`--post-comment`), visible only to Program Chairs, Senior Area Chairs, and Area Chairs, indicating that you've contacted late reviewers
 
 #### Sending Reminder Emails
 

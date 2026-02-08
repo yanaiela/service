@@ -19,7 +19,7 @@ uv run service <command>
 ## Commands
 
 - `service check-pdf <path>` — Validate PDF submissions against conference requirements (page limits, anonymization, required sections)
-- `service missing-reviews` — Find reviewers with missing reviews for your Area Chair papers on OpenReview. Requires `OPENREVIEW_USERNAME` and `OPENREVIEW_PASSWORD` env vars. Supports `--send-email <your-email>` to send SMTP reminders and `--test-email <address>` to redirect all emails to a test address.
+- `service missing-reviews` — Find reviewers with missing reviews for your Area Chair papers on OpenReview. Requires `OPENREVIEW_USERNAME` and `OPENREVIEW_PASSWORD` env vars. Supports `--send-email <your-email>` to send SMTP reminders, `--test-email <address>` to redirect all emails to a test address, and `--post-comment` to post a private forum comment (visible to SACs/PCs/ACs) on each paper.
 
 ## Project Structure
 

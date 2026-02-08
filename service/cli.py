@@ -115,13 +115,20 @@ def check_pdf(path: str, paper_type: str, output: Optional[str], quiet: bool):
     default=None,
     help="Send all emails to this address instead of the actual reviewers (for testing).",
 )
-def missing_reviews(send_email: str, test_email: str):
+@click.option(
+    "--post-comment",
+    is_flag=True,
+    default=False,
+    help="Post a private comment on each paper's forum (visible to SACs/PCs/ACs) indicating you've contacted late reviewers.",
+)
+def missing_reviews(send_email: str, test_email: str, post_comment: bool):
     """Find reviewers with missing reviews for your AC papers."""
     from .openreview_client import (
         get_client,
         get_area_chair_venues,
         get_ac_paper_assignments,
         get_missing_reviews,
+        post_ac_comment,
     )
 
     # 1. Authenticate
@@ -231,6 +238,36 @@ def missing_reviews(send_email: str, test_email: str):
                     console.print(f"  [red]Failed to send to {target}: {error}[/red]")
         console.print("[blue]Done.[/blue]")
 
+    if post_comment:
+        # Collect unique papers from missing entries
+        papers = {}
+        for entry in missing:
+            pid = entry["paper_id"]
+            if pid not in papers:
+                papers[pid] = {
+                    "paper_id": pid,
+                    "paper_number": entry["paper_number"],
+                    "paper_title": entry["paper_title"],
+                }
+
+        console.print(f"\n[bold]Papers to comment on ({len(papers)}):[/bold]")
+        for p in papers.values():
+            console.print(f"  - #{p['paper_number']}: {p['paper_title']}")
+
+        if not click.confirm("\nPost a private comment on each paper's forum?"):
+            console.print("[yellow]Comment posting cancelled.[/yellow]")
+        else:
+            console.print("[blue]Posting comments...[/blue]")
+            for p in list(papers.values()):
+                result = post_ac_comment(
+                    client, venue_id, p["paper_id"], p["paper_number"], user_id
+                )
+                if result[1]:
+                    console.print(f"  [green]Posted comment on paper #{result[0]}[/green]")
+                else:
+                    error = result[2] if len(result) > 2 else "Unknown error"
+                    console.print(f"  [red]Failed on paper #{result[0]}: {error}[/red]")
+            console.print("[blue]Done posting comments.[/blue]")
 
 
 def save_results_to_file(results, output_path: str):

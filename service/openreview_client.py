@@ -83,6 +83,55 @@ def _get_profile_email(profile):
     return None
 
 
+def post_ac_comment(client, venue_id, paper_id, paper_number, user_id):
+    """
+    Post a private comment on a paper's forum as the AC, visible only to
+    Program Chairs, Senior Area Chairs, and Area Chairs.
+
+    Returns (paper_number, True) on success or (paper_number, False, error_msg)
+    on failure.
+    """
+    try:
+        # Look up AC's anonymous group for this paper
+        anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{paper_number}/Area_Chair_"
+        )
+        ac_anon_id = None
+        for ag in anon_groups:
+            if ag.members and user_id in ag.members:
+                ac_anon_id = ag.id
+                break
+
+        if not ac_anon_id:
+            return (paper_number, False, "Could not find AC anonymous ID for this paper")
+
+        from pathlib import Path
+        template_path = Path(__file__).parent / "templates" / "ac_comment.txt"
+        comment_text = template_path.read_text().strip()
+
+        client.post_note_edit(
+            invitation=f"{venue_id}/Submission{paper_number}/-/Official_Comment",
+            signatures=[ac_anon_id],
+            note=openreview.api.Note(
+                forum=paper_id,
+                replyto=paper_id,
+                readers=[
+                    f"{venue_id}/Program_Chairs",
+                    f"{venue_id}/Submission{paper_number}/Senior_Area_Chairs",
+                    f"{venue_id}/Submission{paper_number}/Area_Chairs",
+                ],
+                writers=[venue_id, ac_anon_id],
+                signatures=[ac_anon_id],
+                content={
+                    "comment": {"value": comment_text},
+                },
+            ),
+        )
+        return (paper_number, True)
+    except Exception as e:
+        return (paper_number, False, str(e))
+
+
 def get_missing_reviews(client, venue_id, paper_ids):
     """
     For each paper, find reviewers who haven't submitted reviews.
