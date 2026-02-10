@@ -1,5 +1,5 @@
 """
-OpenReview API interaction for finding missing reviews.
+OpenReview API interaction for finding missing reviews and pulling reviews.
 """
 
 import os
@@ -133,6 +133,132 @@ def post_ac_comment(client, venue_id, paper_id, paper_number, user_id):
         return (paper_number, True)
     except Exception as e:
         return (paper_number, False, str(e))
+
+
+def _get_note_invitations(note):
+    """Get all invitation strings from a note (handles API v1 and v2)."""
+    inv = getattr(note, "invitation", None) or ""
+    invs = getattr(note, "invitations", None) or []
+    return invs + ([inv] if inv else [])
+
+
+def _extract_content_value(field):
+    """Extract the value from a content field (handles dict with 'value' key or plain string)."""
+    if isinstance(field, dict):
+        return field.get("value", "")
+    return field
+
+
+def _classify_note(note):
+    """Classify a note by its invitation type. Returns a category string or None."""
+    all_invs = _get_note_invitations(note)
+    patterns = [
+        (r"/-/Official_Review$", "review"),
+        (r"/-/Meta_Review$", "meta_review"),
+        (r"/-/Decision$", "decision"),
+        (r"/-/Official_Comment$", "comment"),
+    ]
+    for pattern, category in patterns:
+        if any(re.search(pattern, i) for i in all_invs):
+            return category
+    return None
+
+
+def get_paper_reviews(client, venue_id, paper_ids):
+    """
+    Fetch the full discussion thread for each paper.
+
+    Returns list of dicts with keys:
+        paper_id, paper_number, title, authors, abstract,
+        reviews, meta_reviews, decisions, comments
+    """
+    results = []
+
+    for paper_id in paper_ids:
+        note = client.get_note(paper_id)
+        title = _extract_content_value(note.content.get("title", "Unknown"))
+        authors = _extract_content_value(note.content.get("authors", []))
+        if isinstance(authors, list):
+            authors = ", ".join(authors)
+        abstract = _extract_content_value(note.content.get("abstract", ""))
+        number = note.number
+
+        all_notes = client.get_all_notes(forum=paper_id)
+
+        # Build anonymous-to-signature label mapping
+        anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{number}/Reviewer_"
+        )
+        # Map anon group ID to a short label like "Reviewer 1"
+        anon_label = {}
+        for i, ag in enumerate(anon_groups, 1):
+            anon_label[ag.id] = f"Reviewer {i}"
+
+        ac_anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{number}/Area_Chair_"
+        )
+        for ag in ac_anon_groups:
+            anon_label[ag.id] = "Area Chair"
+
+        sac_anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{number}/Senior_Area_Chair_"
+        )
+        for ag in sac_anon_groups:
+            anon_label[ag.id] = "Senior Area Chair"
+
+        # Classify notes
+        reviews = []
+        meta_reviews = []
+        decisions = []
+        comments = []
+
+        for n in all_notes:
+            if n.id == paper_id:
+                continue  # skip the submission itself
+            category = _classify_note(n)
+            if category is None:
+                continue
+
+            # Extract all content fields
+            content = {}
+            if hasattr(n, "content") and isinstance(n.content, dict):
+                for key, val in n.content.items():
+                    content[key] = _extract_content_value(val)
+
+            # Resolve signature label
+            sig_labels = []
+            for sig in (n.signatures or []):
+                sig_labels.append(anon_label.get(sig, sig.rsplit("/", 1)[-1]))
+
+            entry = {
+                "id": n.id,
+                "content": content,
+                "signatures": sig_labels,
+                "replyto": n.replyto,
+            }
+
+            if category == "review":
+                reviews.append(entry)
+            elif category == "meta_review":
+                meta_reviews.append(entry)
+            elif category == "decision":
+                decisions.append(entry)
+            elif category == "comment":
+                comments.append(entry)
+
+        results.append({
+            "paper_id": paper_id,
+            "paper_number": number,
+            "title": title,
+            "authors": authors,
+            "abstract": abstract,
+            "reviews": reviews,
+            "meta_reviews": meta_reviews,
+            "decisions": decisions,
+            "comments": comments,
+        })
+
+    return results
 
 
 def get_missing_reviews(client, venue_id, paper_ids):
