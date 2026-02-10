@@ -10,7 +10,10 @@ from openreview.api import OpenReviewClient
 
 
 def get_client():
-    """Authenticate with OpenReview using environment variables."""
+    """Authenticate with OpenReview using environment variables (loads .env if present)."""
+    from dotenv import load_dotenv
+
+    load_dotenv()
     username = os.environ.get("OPENREVIEW_USERNAME")
     password = os.environ.get("OPENREVIEW_PASSWORD")
     if not username or not password:
