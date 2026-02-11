@@ -201,6 +201,27 @@ Select a venue: 1
 Total missing reviews: 1
 ```
 
+### Pull Reviews
+
+Fetches reviews, meta-reviews, decisions, and comments for papers you're assigned to as Area Chair on OpenReview and exports them as structured markdown files.
+
+#### Usage
+
+```bash
+# Pull reviews and save to ./reviews/
+uv run service pull-reviews
+
+# Save to a custom directory
+uv run service pull-reviews --output-dir ./my-reviews
+```
+
+The command will:
+1. Authenticate with OpenReview
+2. List all venues where you are an Area Chair
+3. Prompt you to select a venue
+4. Fetch reviews, meta-reviews, decisions, and comments for each assigned paper
+5. Save each paper's full discussion thread as a markdown file
+
 ## Page Counting Logic
 
 The tool uses sophisticated logic to determine content pages:

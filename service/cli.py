@@ -3,6 +3,7 @@ Command-line interface for service-utils.
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -268,6 +269,149 @@ def missing_reviews(send_email: str, test_email: str, post_comment: bool):
                     error = result[2] if len(result) > 2 else "Unknown error"
                     console.print(f"  [red]Failed on paper #{result[0]}: {error}[/red]")
             console.print("[blue]Done posting comments.[/blue]")
+
+
+@main.command("pull-reviews")
+@click.option(
+    "--output-dir", "-o",
+    type=click.Path(),
+    default="./reviews",
+    help="Directory to save review markdown files (default: ./reviews).",
+)
+def pull_reviews(output_dir: str):
+    """Pull reviews for your AC papers and save as markdown files."""
+    from .openreview_client import (
+        get_client,
+        get_area_chair_venues,
+        get_ac_paper_assignments,
+        get_paper_reviews,
+    )
+
+    # 1. Authenticate
+    try:
+        client = get_client()
+    except RuntimeError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort()
+
+    # 2. Get user profile
+    profile = client.get_profile()
+    user_id = profile.id
+    console.print(f"[blue]Logged in as: {user_id}[/blue]")
+
+    # 3. Discover AC venues
+    venues = get_area_chair_venues(client, user_id)
+    if not venues:
+        console.print("[yellow]No Area Chair venues found for your account.[/yellow]")
+        return
+
+    console.print("\n[bold]Your Area Chair venues:[/bold]")
+    for i, v in enumerate(venues, 1):
+        console.print(f"  {i}. {v['venue_id']}")
+
+    choice = click.prompt(
+        "\nSelect a venue",
+        type=click.IntRange(1, len(venues)),
+    )
+    selected = venues[choice - 1]
+    venue_id = selected["venue_id"]
+    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
+
+    # 4. Fetch AC paper assignments
+    console.print("[blue]Fetching paper assignments...[/blue]")
+    paper_ids = get_ac_paper_assignments(client, venue_id, user_id)
+    if not paper_ids:
+        console.print("[yellow]No papers assigned to you as AC in this venue.[/yellow]")
+        return
+    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
+
+    # 5. Pull reviews
+    console.print("[blue]Pulling reviews...[/blue]")
+    papers = get_paper_reviews(client, venue_id, paper_ids)
+
+    # 6. Write markdown files
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    for paper in papers:
+        md = _render_paper_markdown(paper)
+        safe_title = re.sub(r"[^\w\s-]", "", paper["title"])[:60].strip().replace(" ", "_")
+        filename = f"paper_{paper['paper_number']}_{safe_title}.md"
+        filepath = out / filename
+        filepath.write_text(md, encoding="utf-8")
+        console.print(f"  [green]Saved: {filepath}[/green]")
+
+    console.print(f"\n[green]Done! {len(papers)} paper(s) saved to {out}/[/green]")
+
+
+def _render_paper_markdown(paper: dict) -> str:
+    """Render a paper's full discussion thread as markdown."""
+    lines = []
+    lines.append(f"# Paper {paper['paper_number']}: {paper['title']}\n")
+    lines.append(f"**Authors:** {paper['authors']}\n")
+    lines.append(f"## Abstract\n\n{paper['abstract']}\n")
+
+    # Reviews
+    for i, review in enumerate(paper["reviews"], 1):
+        sig = ", ".join(review["signatures"])
+        lines.append(f"---\n\n## Review {i} ({sig})\n")
+        content = review["content"]
+        for key, val in content.items():
+            if not val:
+                continue
+            pretty_key = key.replace("_", " ").title()
+            # Short values (scores, ratings) as bold key-value pairs
+            val_str = str(val)
+            if len(val_str) < 100 and "\n" not in val_str:
+                lines.append(f"**{pretty_key}:** {val_str}\n")
+            else:
+                lines.append(f"### {pretty_key}\n\n{val_str}\n")
+
+    # Meta reviews
+    for i, meta in enumerate(paper["meta_reviews"], 1):
+        sig = ", ".join(meta["signatures"])
+        lines.append(f"---\n\n## Meta Review {i} ({sig})\n")
+        for key, val in meta["content"].items():
+            if not val:
+                continue
+            pretty_key = key.replace("_", " ").title()
+            val_str = str(val)
+            if len(val_str) < 100 and "\n" not in val_str:
+                lines.append(f"**{pretty_key}:** {val_str}\n")
+            else:
+                lines.append(f"### {pretty_key}\n\n{val_str}\n")
+
+    # Decisions
+    for decision in paper["decisions"]:
+        sig = ", ".join(decision["signatures"])
+        lines.append(f"---\n\n## Decision ({sig})\n")
+        for key, val in decision["content"].items():
+            if not val:
+                continue
+            pretty_key = key.replace("_", " ").title()
+            val_str = str(val)
+            if len(val_str) < 100 and "\n" not in val_str:
+                lines.append(f"**{pretty_key}:** {val_str}\n")
+            else:
+                lines.append(f"### {pretty_key}\n\n{val_str}\n")
+
+    # Comments
+    if paper["comments"]:
+        lines.append("---\n\n## Comments\n")
+        for comment in paper["comments"]:
+            sig = ", ".join(comment["signatures"])
+            lines.append(f"### Comment by {sig}\n")
+            for key, val in comment["content"].items():
+                if not val:
+                    continue
+                pretty_key = key.replace("_", " ").title()
+                val_str = str(val)
+                if len(val_str) < 100 and "\n" not in val_str:
+                    lines.append(f"**{pretty_key}:** {val_str}\n")
+                else:
+                    lines.append(f"{val_str}\n")
+
+    return "\n".join(lines)
 
 
 def save_results_to_file(results, output_path: str):
