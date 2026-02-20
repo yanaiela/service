@@ -218,13 +218,16 @@ def _select_papers(client, paper_ids):
         default="0",
     )
 
-    choices = {c.strip() for c in raw.split(",") if c.strip()}
+    choices = [c.strip() for c in raw.split(",") if c.strip()]
     if "0" in choices:
         return paper_ids
 
     id_map = {str(i): s["paper_id"] for i, s in enumerate(summaries, 1)}
     selected = []
-    for c in sorted(choices, key=lambda x: int(x)):
+    for c in choices:
+        if not c.isdigit():
+            console.print(f"[yellow]Warning: '{c}' is not a valid index, skipping.[/yellow]")
+            continue
         if c not in id_map:
             console.print(f"[yellow]Warning: index {c} is out of range, skipping.[/yellow]")
         else:
@@ -241,11 +244,12 @@ def _select_papers(client, paper_ids):
 )
 @click.option(
     "--paper", "-p",
+    "paper_filter",
     type=str,
     default=None,
     help="Comma-separated paper numbers to pull (e.g. 42,57). Pulls all if omitted.",
 )
-def pull_reviewer_reviews(output_dir: str, paper: str):
+def pull_reviewer_reviews(output_dir: str, paper_filter: str):
     """Pull all reviews for papers you're assigned to as a Reviewer and save as markdown files."""
     from .openreview_client import get_paper_reviews, filter_paper_ids_by_number
 
@@ -254,8 +258,8 @@ def pull_reviewer_reviews(output_dir: str, paper: str):
         return
     client, user_id, venue_id, paper_ids = setup
 
-    if paper:
-        requested = {int(n.strip()) for n in paper.split(",") if n.strip()}
+    if paper_filter:
+        requested = {int(n.strip()) for n in paper_filter.split(",") if n.strip()}
         paper_ids, unknown = filter_paper_ids_by_number(client, paper_ids, requested)
         for num in sorted(unknown):
             console.print(f"[yellow]Warning: paper #{num} not found in your assignments.[/yellow]")
@@ -511,11 +515,12 @@ def nudge_reviewers(dry_run: bool, post_comment: bool):
 )
 @click.option(
     "--paper", "-p",
+    "paper_filter",
     type=str,
     default=None,
     help="Comma-separated paper numbers to pull (e.g. 42,57). Pulls all if omitted.",
 )
-def pull_reviews(output_dir: str, paper: str):
+def pull_reviews(output_dir: str, paper_filter: str):
     """Pull reviews for your AC papers and save as markdown files."""
     from .openreview_client import get_paper_reviews, filter_paper_ids_by_number
 
@@ -524,8 +529,8 @@ def pull_reviews(output_dir: str, paper: str):
         return
     client, user_id, venue_id, paper_ids = setup
 
-    if paper:
-        requested = {int(n.strip()) for n in paper.split(",") if n.strip()}
+    if paper_filter:
+        requested = {int(n.strip()) for n in paper_filter.split(",") if n.strip()}
         paper_ids, unknown = filter_paper_ids_by_number(client, paper_ids, requested)
         for num in sorted(unknown):
             console.print(f"[yellow]Warning: paper #{num} not found in your assignments.[/yellow]")
