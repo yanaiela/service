@@ -201,26 +201,57 @@ Select a venue: 1
 Total missing reviews: 1
 ```
 
-### Pull Reviews
+### Pull Reviews (Area Chair)
 
 Fetches reviews, meta-reviews, decisions, and comments for papers you're assigned to as Area Chair on OpenReview and exports them as structured markdown files.
 
 #### Usage
 
 ```bash
-# Pull reviews and save to ./reviews/
-uv run service pull-reviews
+# Pull reviews and save to ./reviews/ (interactive paper selection)
+uv run service pull-reviews-ac
+
+# Pull reviews for specific papers by paper number
+uv run service pull-reviews-ac --paper 42
+uv run service pull-reviews-ac --paper 42,57,103
 
 # Save to a custom directory
-uv run service pull-reviews --output-dir ./my-reviews
+uv run service pull-reviews-ac --output-dir ./my-reviews
 ```
 
 The command will:
 1. Authenticate with OpenReview
 2. List all venues where you are an Area Chair
 3. Prompt you to select a venue
-4. Fetch reviews, meta-reviews, decisions, and comments for each assigned paper
-5. Save each paper's full discussion thread as a markdown file
+4. Show a numbered list of your assigned papers and prompt you to pick one, several, or all
+5. Fetch reviews, meta-reviews, decisions, and comments for the selected papers
+6. Save each paper's full discussion thread as a markdown file
+
+### Pull Reviews (Reviewer)
+
+Fetches reviews for papers you're assigned to as Reviewer on OpenReview and exports them as structured markdown files.
+
+#### Usage
+
+```bash
+# Pull reviews and save to ./reviews/ (interactive paper selection)
+uv run service pull-reviews-reviewer
+
+# Pull reviews for specific papers by paper number
+uv run service pull-reviews-reviewer --paper 42
+uv run service pull-reviews-reviewer --paper 42,57
+
+# Save to a custom directory
+uv run service pull-reviews-reviewer --output-dir ./my-reviews
+```
+
+The command will:
+1. Authenticate with OpenReview
+2. List all venues where you are a Reviewer
+3. Prompt you to select a venue
+4. Show a numbered list of your assigned papers and prompt you to pick one, several, or all
+5. Fetch reviews, meta-reviews, decisions, and comments for the selected papers
+6. Save each paper's full discussion thread as a markdown file
 
 ## Page Counting Logic
 
