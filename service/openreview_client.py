@@ -261,6 +261,187 @@ def get_paper_reviews(client, venue_id, paper_ids):
     return results
 
 
+def get_reviewers_without_response(client, venue_id, paper_ids):
+    """
+    For each paper, find reviewers who submitted a review, received an author
+    response to that review, but have not yet replied to it.
+
+    Author responses are detected as Official_Comment notes signed by the
+    Authors group that reply directly to a review note (venues may not use a
+    dedicated Rebuttal invitation).
+
+    Returns list of dicts:
+        {paper_title, paper_number, paper_id, reviewer_id, reviewer_anon_id}
+    """
+    results = []
+
+    for paper_id in paper_ids:
+        note = client.get_note(paper_id)
+        title = note.content.get("title", {})
+        if isinstance(title, dict):
+            title = title.get("value", "Unknown")
+        number = note.number
+
+        all_notes = client.get_all_notes(forum=paper_id)
+
+        # Build a parent -> [children] map for thread traversal
+        children_of = {}
+        for n in all_notes:
+            parent = getattr(n, "replyto", None)
+            if parent:
+                children_of.setdefault(parent, []).append(n)
+
+        # Map anonymous reviewer IDs <-> profile IDs
+        anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{number}/Reviewer_"
+        )
+        anon_to_profile = {}
+        profile_to_anon = {}
+        for ag in anon_groups:
+            if ag.members:
+                anon_to_profile[ag.id] = ag.members[0]
+                profile_to_anon[ag.members[0]] = ag.id
+
+        def _is_official_comment(n):
+            inv = getattr(n, "invitation", None) or ""
+            invs = getattr(n, "invitations", None) or []
+            return any(re.search(r"/-/Official_Comment$", i) for i in invs + ([inv] if inv else []))
+
+        def _is_official_review(n):
+            inv = getattr(n, "invitation", None) or ""
+            invs = getattr(n, "invitations", None) or []
+            return any(re.search(r"/-/Official_Review$", i) for i in invs + ([inv] if inv else []))
+
+        def _signed_by_authors(n):
+            return any(re.search(r"(/|^)Authors$", sig) for sig in (n.signatures or []))
+
+        def _subtree_notes(root_id):
+            """All notes in the subtree rooted at root_id (children, grandchildren, …)."""
+            found = []
+            queue = [root_id]
+            while queue:
+                current = queue.pop()
+                for child in children_of.get(current, []):
+                    found.append(child)
+                    queue.append(child.id)
+            return found
+
+        # For each reviewer anon ID: find their review note
+        review_note_by_anon = {}
+        for n in all_notes:
+            if not _is_official_review(n):
+                continue
+            for sig in (n.signatures or []):
+                if sig in anon_to_profile:
+                    review_note_by_anon[sig] = n
+
+        if not review_note_by_anon:
+            continue  # no reviews submitted yet
+
+        # For each review, find the direct author-response comment (if any)
+        # An author response is an Official_Comment by Authors replying to the review note.
+        author_response_id_for_review = {}  # review_note_id -> author response note id
+        for n in all_notes:
+            if not _is_official_comment(n):
+                continue
+            if not _signed_by_authors(n):
+                continue
+            replyto = getattr(n, "replyto", None)
+            review_note_ids = {rn.id for rn in review_note_by_anon.values()}
+            if replyto in review_note_ids:
+                author_response_id_for_review[replyto] = n.id
+
+        if not author_response_id_for_review:
+            continue  # no author responses posted yet
+
+        # For each reviewer whose review got an author response, check whether
+        # the reviewer posted any Official_Comment in that response's subtree.
+        reviewer_edges = client.get_all_edges(
+            invitation=f"{venue_id}/Reviewers/-/Assignment",
+            head=paper_id,
+        )
+        assigned_reviewer_ids = [edge.tail for edge in reviewer_edges]
+
+        for rid in assigned_reviewer_ids:
+            anon_id = profile_to_anon.get(rid)
+            if not anon_id:
+                continue
+            review_note = review_note_by_anon.get(anon_id)
+            if not review_note:
+                continue  # reviewer has no review yet
+            author_response_id = author_response_id_for_review.get(review_note.id)
+            if not author_response_id:
+                continue  # no author response to this reviewer's review
+
+            # Check whether the reviewer replied anywhere in the author-response thread
+            replied = any(
+                anon_id in (n.signatures or []) and _is_official_comment(n)
+                for n in _subtree_notes(author_response_id)
+            )
+            if not replied:
+                results.append({
+                    "paper_title": title,
+                    "paper_number": number,
+                    "paper_id": paper_id,
+                    "reviewer_id": rid,
+                    "reviewer_anon_id": anon_id,
+                })
+
+    return results
+
+
+def post_reviewer_rebuttal_comment(client, venue_id, paper_id, paper_number, user_id, reviewer_anon_ids):
+    """
+    Post a single private forum comment visible to all specified reviewers and
+    the AC/SAC/PC hierarchy, asking them to respond to the author rebuttal.
+
+    reviewer_anon_ids: list of anonymous reviewer group IDs for this paper.
+
+    Returns (paper_number, True) on success or
+            (paper_number, False, error_msg) on failure.
+    """
+    try:
+        anon_groups = client.get_groups(
+            prefix=f"{venue_id}/Submission{paper_number}/Area_Chair_"
+        )
+        ac_anon_id = None
+        for ag in anon_groups:
+            if ag.members and user_id in ag.members:
+                ac_anon_id = ag.id
+                break
+
+        if not ac_anon_id:
+            return (paper_number, False, "Could not find AC anonymous ID for this paper")
+
+        from pathlib import Path
+        template_path = Path(__file__).parent / "templates" / "reviewer_rebuttal_nudge.txt"
+        comment_text = template_path.read_text().strip()
+
+        readers = [
+            f"{venue_id}/Program_Chairs",
+            f"{venue_id}/Submission{paper_number}/Senior_Area_Chairs",
+            f"{venue_id}/Submission{paper_number}/Area_Chairs",
+        ] + list(reviewer_anon_ids)
+
+        client.post_note_edit(
+            invitation=f"{venue_id}/Submission{paper_number}/-/Official_Comment",
+            signatures=[ac_anon_id],
+            note=openreview.api.Note(
+                forum=paper_id,
+                replyto=paper_id,
+                readers=readers,
+                writers=[venue_id, ac_anon_id],
+                signatures=[ac_anon_id],
+                content={
+                    "comment": {"value": comment_text},
+                },
+            ),
+        )
+        return (paper_number, True)
+    except Exception as e:
+        return (paper_number, False, str(e))
+
+
 def get_missing_reviews(client, venue_id, paper_ids):
     """
     For each paper, find reviewers who haven't submitted reviews.

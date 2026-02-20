@@ -103,6 +103,53 @@ def check_pdf(path: str, paper_type: str, output: Optional[str], quiet: bool):
         console.print(f"[green]Results saved to {output}[/green]")
 
 
+def _openreview_ac_setup():
+    """
+    Shared setup for OpenReview AC commands: authenticate, select a venue,
+    and fetch assigned paper IDs.
+
+    Returns (client, user_id, venue_id, paper_ids), or None on a soft exit
+    (no venues / no papers) after printing an explanation.
+    """
+    from .openreview_client import (
+        get_client,
+        get_area_chair_venues,
+        get_ac_paper_assignments,
+    )
+
+    try:
+        client = get_client()
+    except RuntimeError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort()
+
+    profile = client.get_profile()
+    user_id = profile.id
+    console.print(f"[blue]Logged in as: {user_id}[/blue]")
+
+    venues = get_area_chair_venues(client, user_id)
+    if not venues:
+        console.print("[yellow]No Area Chair venues found for your account.[/yellow]")
+        return None
+
+    console.print("\n[bold]Your Area Chair venues:[/bold]")
+    for i, v in enumerate(venues, 1):
+        console.print(f"  {i}. {v['venue_id']}")
+
+    choice = click.prompt("\nSelect a venue", type=click.IntRange(1, len(venues)))
+    venue_id = venues[choice - 1]["venue_id"]
+    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
+
+    console.print("[blue]Fetching paper assignments...[/blue]")
+    paper_ids = get_ac_paper_assignments(client, venue_id, user_id)
+    if not paper_ids:
+        console.print("[yellow]No papers assigned to you as AC in this venue.[/yellow]")
+        return None
+    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
+
+    return client, user_id, venue_id, paper_ids
+
+
 @main.command("missing-reviews")
 @click.option(
     "--send-email",
@@ -124,57 +171,16 @@ def check_pdf(path: str, paper_type: str, output: Optional[str], quiet: bool):
 )
 def missing_reviews(send_email: str, test_email: str, post_comment: bool):
     """Find reviewers with missing reviews for your AC papers."""
-    from .openreview_client import (
-        get_client,
-        get_area_chair_venues,
-        get_ac_paper_assignments,
-        get_missing_reviews,
-        post_ac_comment,
-    )
+    from .openreview_client import get_missing_reviews, post_ac_comment
 
-    # 1. Authenticate
-    try:
-        client = get_client()
-    except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise click.Abort()
-
-    # 2. Get user profile
-    profile = client.get_profile()
-    user_id = profile.id
-    console.print(f"[blue]Logged in as: {user_id}[/blue]")
-
-    # 3. Discover AC venues
-    venues = get_area_chair_venues(client, user_id)
-    if not venues:
-        console.print("[yellow]No Area Chair venues found for your account.[/yellow]")
+    setup = _openreview_ac_setup()
+    if setup is None:
         return
+    client, user_id, venue_id, paper_ids = setup
 
-    console.print("\n[bold]Your Area Chair venues:[/bold]")
-    for i, v in enumerate(venues, 1):
-        console.print(f"  {i}. {v['venue_id']}")
-
-    choice = click.prompt(
-        "\nSelect a venue",
-        type=click.IntRange(1, len(venues)),
-    )
-    selected = venues[choice - 1]
-    venue_id = selected["venue_id"]
-    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
-
-    # 4. Fetch AC paper assignments
-    console.print("[blue]Fetching paper assignments...[/blue]")
-    paper_ids = get_ac_paper_assignments(client, venue_id, user_id)
-    if not paper_ids:
-        console.print("[yellow]No papers assigned to you as AC in this venue.[/yellow]")
-        return
-    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
-
-    # 5. Find missing reviews
     console.print("[blue]Checking for missing reviews...[/blue]")
     missing = get_missing_reviews(client, venue_id, paper_ids)
 
-    # 6. Display results
     if not missing:
         console.print("[green]All reviewers have submitted their reviews![/green]")
         return
@@ -271,6 +277,96 @@ def missing_reviews(send_email: str, test_email: str, post_comment: bool):
             console.print("[blue]Done posting comments.[/blue]")
 
 
+@main.command("nudge-reviewers")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Show a summary of non-responsive reviewers without posting any comments.",
+)
+@click.option(
+    "--post-comment",
+    is_flag=True,
+    default=False,
+    help="Post a private forum comment visible only to the reviewer and AC/SAC/PC.",
+)
+def nudge_reviewers(dry_run: bool, post_comment: bool):
+    """Find reviewers who haven't responded to author rebuttals and nudge them."""
+    from .openreview_client import (
+        get_reviewers_without_response,
+        post_reviewer_rebuttal_comment,
+    )
+
+    setup = _openreview_ac_setup()
+    if setup is None:
+        return
+    client, user_id, venue_id, paper_ids = setup
+
+    console.print("[blue]Checking for unanswered author responses...[/blue]")
+    non_responsive = get_reviewers_without_response(client, venue_id, paper_ids)
+
+    if not non_responsive:
+        console.print("[green]All reviewers have responded to the author responses![/green]")
+        return
+
+    table = Table(title="Reviewers Without Response to Author Rebuttal")
+    table.add_column("Paper #", style="cyan", justify="right")
+    table.add_column("Paper Title", style="white")
+    table.add_column("OpenReview Link", style="blue")
+    table.add_column("Reviewer ID", style="yellow")
+
+    for entry in non_responsive:
+        link = f"https://openreview.net/forum?id={entry['paper_id']}"
+        table.add_row(
+            str(entry["paper_number"]),
+            entry["paper_title"],
+            link,
+            entry["reviewer_id"],
+        )
+
+    console.print(table)
+    console.print(f"\n[red]Total non-responsive reviewers: {len(non_responsive)}[/red]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run — no comments posted.[/yellow]")
+        return
+
+    if post_comment:
+        if not click.confirm("\nPost a private comment on each paper forum directed at non-responsive reviewers?"):
+            console.print("[yellow]Comment posting cancelled.[/yellow]")
+        else:
+            # Group non-responsive reviewers by paper, collecting their anon IDs
+            papers = {}
+            for entry in non_responsive:
+                pid = entry["paper_id"]
+                if pid not in papers:
+                    papers[pid] = {
+                        "paper_id": pid,
+                        "paper_number": entry["paper_number"],
+                        "paper_title": entry["paper_title"],
+                        "reviewer_anon_ids": [],
+                    }
+                anon_id = entry.get("reviewer_anon_id")
+                if anon_id:
+                    papers[pid]["reviewer_anon_ids"].append(anon_id)
+
+            console.print("[blue]Posting comments...[/blue]")
+            for p in papers.values():
+                if not p["reviewer_anon_ids"]:
+                    console.print(f"  [yellow]Skipped paper #{p['paper_number']}: no anonymous IDs found[/yellow]")
+                    continue
+                result = post_reviewer_rebuttal_comment(
+                    client, venue_id, p["paper_id"], p["paper_number"],
+                    user_id, p["reviewer_anon_ids"],
+                )
+                if result[1]:
+                    console.print(f"  [green]Posted comment on paper #{result[0]}[/green]")
+                else:
+                    error = result[2] if len(result) > 2 else "Unknown error"
+                    console.print(f"  [red]Failed on paper #{result[0]}: {error}[/red]")
+            console.print("[blue]Done posting comments.[/blue]")
+
+
 @main.command("pull-reviews")
 @click.option(
     "--output-dir", "-o",
@@ -280,56 +376,16 @@ def missing_reviews(send_email: str, test_email: str, post_comment: bool):
 )
 def pull_reviews(output_dir: str):
     """Pull reviews for your AC papers and save as markdown files."""
-    from .openreview_client import (
-        get_client,
-        get_area_chair_venues,
-        get_ac_paper_assignments,
-        get_paper_reviews,
-    )
+    from .openreview_client import get_paper_reviews
 
-    # 1. Authenticate
-    try:
-        client = get_client()
-    except RuntimeError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise click.Abort()
-
-    # 2. Get user profile
-    profile = client.get_profile()
-    user_id = profile.id
-    console.print(f"[blue]Logged in as: {user_id}[/blue]")
-
-    # 3. Discover AC venues
-    venues = get_area_chair_venues(client, user_id)
-    if not venues:
-        console.print("[yellow]No Area Chair venues found for your account.[/yellow]")
+    setup = _openreview_ac_setup()
+    if setup is None:
         return
+    client, user_id, venue_id, paper_ids = setup
 
-    console.print("\n[bold]Your Area Chair venues:[/bold]")
-    for i, v in enumerate(venues, 1):
-        console.print(f"  {i}. {v['venue_id']}")
-
-    choice = click.prompt(
-        "\nSelect a venue",
-        type=click.IntRange(1, len(venues)),
-    )
-    selected = venues[choice - 1]
-    venue_id = selected["venue_id"]
-    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
-
-    # 4. Fetch AC paper assignments
-    console.print("[blue]Fetching paper assignments...[/blue]")
-    paper_ids = get_ac_paper_assignments(client, venue_id, user_id)
-    if not paper_ids:
-        console.print("[yellow]No papers assigned to you as AC in this venue.[/yellow]")
-        return
-    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
-
-    # 5. Pull reviews
     console.print("[blue]Pulling reviews...[/blue]")
     papers = get_paper_reviews(client, venue_id, paper_ids)
 
-    # 6. Write markdown files
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
