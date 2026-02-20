@@ -235,7 +235,7 @@ def _select_papers(client, paper_ids):
     return selected
 
 
-@main.command("pull-reviewer-reviews")
+@main.command("pull-reviews-reviewer")
 @click.option(
     "--output-dir", "-o",
     type=click.Path(),
@@ -506,7 +506,7 @@ def nudge_reviewers(dry_run: bool, post_comment: bool):
             console.print("[blue]Done posting comments.[/blue]")
 
 
-@main.command("pull-reviews")
+@main.command("pull-reviews-ac")
 @click.option(
     "--output-dir", "-o",
     type=click.Path(),
