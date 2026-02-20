@@ -27,6 +27,41 @@ def get_client():
     )
 
 
+def get_reviewer_venues(client, user_id):
+    """
+    Discover all venues where user_id is a Reviewer.
+
+    Returns list of dicts: {venue_id, group_id}
+    """
+    groups = client.get_groups(member=user_id)
+    seen = set()
+    venues = []
+    for g in groups:
+        if g.id.endswith("/Reviewers"):
+            venue_id = g.id.rsplit("/Reviewers", 1)[0]
+            # Skip paper-level reviewer groups (e.g. .../Submission1234/Reviewers)
+            last_segment = venue_id.rsplit("/", 1)[-1]
+            if re.match(r"(Paper|Submission)\d+", last_segment):
+                continue
+            if venue_id not in seen:
+                seen.add(venue_id)
+                venues.append({"venue_id": venue_id, "group_id": g.id})
+    return list(reversed(venues))
+
+
+def get_reviewer_paper_assignments(client, venue_id, user_id):
+    """
+    Get paper IDs assigned to user_id as a Reviewer in the given venue.
+
+    Returns list of paper note IDs.
+    """
+    edges = client.get_all_edges(
+        invitation=f"{venue_id}/Reviewers/-/Assignment",
+        tail=user_id,
+    )
+    return [edge.head for edge in edges]
+
+
 def get_area_chair_venues(client, user_id):
     """
     Discover all venues where user_id is an Area Chair.
@@ -153,7 +188,8 @@ def _classify_note(note):
     """Classify a note by its invitation type. Returns a category string or None."""
     all_invs = _get_note_invitations(note)
     patterns = [
-        (r"/-/Official_Review$", "review"),
+        (r"/-/Official_Review$", "review"),  # NeurIPS, ICLR, etc.
+        (r"/-/Review$", "review"),            # ARR, TMLR, etc.
         (r"/-/Meta_Review$", "meta_review"),
         (r"/-/Decision$", "decision"),
         (r"/-/Official_Comment$", "comment"),
@@ -162,6 +198,39 @@ def _classify_note(note):
         if any(re.search(pattern, i) for i in all_invs):
             return category
     return None
+
+
+def get_paper_summaries(client, paper_ids):
+    """
+    Fetch lightweight summaries (id, number, title) for a list of paper note IDs.
+
+    Returns list of dicts: {paper_id, number, title}
+    """
+    summaries = []
+    for pid in paper_ids:
+        note = client.get_note(pid)
+        title = _extract_content_value(note.content.get("title", "Unknown"))
+        summaries.append({"paper_id": pid, "number": note.number, "title": title})
+    summaries.sort(key=lambda x: x["number"])
+    return summaries
+
+
+def filter_paper_ids_by_number(client, paper_ids, paper_numbers):
+    """
+    Return the subset of paper_ids whose note.number is in paper_numbers.
+
+    Warns (via returned list) about numbers that were not found.
+    Returns (filtered_ids, unknown_numbers).
+    """
+    filtered = []
+    found_numbers = set()
+    for pid in paper_ids:
+        note = client.get_note(pid)
+        if note.number in paper_numbers:
+            filtered.append(pid)
+            found_numbers.add(note.number)
+    unknown = paper_numbers - found_numbers
+    return filtered, unknown
 
 
 def get_paper_reviews(client, venue_id, paper_ids):
