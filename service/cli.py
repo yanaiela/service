@@ -150,6 +150,145 @@ def _openreview_ac_setup():
     return client, user_id, venue_id, paper_ids
 
 
+def _openreview_reviewer_setup():
+    """
+    Shared setup for OpenReview reviewer commands: authenticate, select a venue,
+    and fetch assigned paper IDs.
+
+    Returns (client, user_id, venue_id, paper_ids), or None on a soft exit
+    (no venues / no papers) after printing an explanation.
+    """
+    from .openreview_client import (
+        get_client,
+        get_reviewer_venues,
+        get_reviewer_paper_assignments,
+    )
+
+    try:
+        client = get_client()
+    except RuntimeError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise click.Abort()
+
+    profile = client.get_profile()
+    user_id = profile.id
+    console.print(f"[blue]Logged in as: {user_id}[/blue]")
+
+    venues = get_reviewer_venues(client, user_id)
+    if not venues:
+        console.print("[yellow]No Reviewer venues found for your account.[/yellow]")
+        return None
+
+    console.print("\n[bold]Your Reviewer venues:[/bold]")
+    for i, v in enumerate(venues, 1):
+        console.print(f"  {i}. {v['venue_id']}")
+
+    choice = click.prompt("\nSelect a venue", type=click.IntRange(1, len(venues)))
+    venue_id = venues[choice - 1]["venue_id"]
+    console.print(f"\n[blue]Selected: {venue_id}[/blue]")
+
+    console.print("[blue]Fetching paper assignments...[/blue]")
+    paper_ids = get_reviewer_paper_assignments(client, venue_id, user_id)
+    if not paper_ids:
+        console.print("[yellow]No papers assigned to you as Reviewer in this venue.[/yellow]")
+        return None
+    console.print(f"[blue]Found {len(paper_ids)} assigned paper(s).[/blue]")
+
+    return client, user_id, venue_id, paper_ids
+
+
+def _select_papers(client, paper_ids):
+    """
+    Interactively prompt the user to select a subset of papers (or all).
+
+    Returns the filtered list of paper_ids.
+    """
+    from .openreview_client import get_paper_summaries
+
+    console.print("[blue]Fetching paper list...[/blue]")
+    summaries = get_paper_summaries(client, paper_ids)
+
+    console.print("\n[bold]Available papers:[/bold]")
+    console.print("  [cyan]0.[/cyan] All papers")
+    for i, s in enumerate(summaries, 1):
+        console.print(f"  [cyan]{i}.[/cyan] #{s['number']}: {s['title']}")
+
+    raw = click.prompt(
+        "\nSelect papers (comma-separated indices, or 0 for all)",
+        default="0",
+    )
+
+    choices = [c.strip() for c in raw.split(",") if c.strip()]
+    if "0" in choices:
+        return paper_ids
+
+    id_map = {str(i): s["paper_id"] for i, s in enumerate(summaries, 1)}
+    selected = []
+    for c in choices:
+        if not c.isdigit():
+            console.print(f"[yellow]Warning: '{c}' is not a valid index, skipping.[/yellow]")
+            continue
+        if c not in id_map:
+            console.print(f"[yellow]Warning: index {c} is out of range, skipping.[/yellow]")
+        else:
+            selected.append(id_map[c])
+    return selected
+
+
+@main.command("pull-reviews-reviewer")
+@click.option(
+    "--output-dir", "-o",
+    type=click.Path(),
+    default="./reviews",
+    help="Directory to save review markdown files (default: ./reviews).",
+)
+@click.option(
+    "--paper", "-p",
+    "paper_filter",
+    type=str,
+    default=None,
+    help="Comma-separated paper numbers to pull (e.g. 42,57). Pulls all if omitted.",
+)
+def pull_reviewer_reviews(output_dir: str, paper_filter: str):
+    """Pull all reviews for papers you're assigned to as a Reviewer and save as markdown files."""
+    from .openreview_client import get_paper_reviews, filter_paper_ids_by_number
+
+    setup = _openreview_reviewer_setup()
+    if setup is None:
+        return
+    client, user_id, venue_id, paper_ids = setup
+
+    if paper_filter:
+        requested = {int(n.strip()) for n in paper_filter.split(",") if n.strip()}
+        paper_ids, unknown = filter_paper_ids_by_number(client, paper_ids, requested)
+        for num in sorted(unknown):
+            console.print(f"[yellow]Warning: paper #{num} not found in your assignments.[/yellow]")
+        if not paper_ids:
+            console.print("[yellow]No matching papers found.[/yellow]")
+            return
+    else:
+        paper_ids = _select_papers(client, paper_ids)
+        if not paper_ids:
+            console.print("[yellow]No papers selected.[/yellow]")
+            return
+
+    console.print("[blue]Pulling reviews...[/blue]")
+    papers = get_paper_reviews(client, venue_id, paper_ids)
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    for paper in papers:
+        md = _render_paper_markdown(paper)
+        safe_title = re.sub(r"[^\w\s-]", "", paper["title"])[:60].strip().replace(" ", "_")
+        filename = f"paper_{paper['paper_number']}_{safe_title}.md"
+        filepath = out / filename
+        filepath.write_text(md, encoding="utf-8")
+        console.print(f"  [green]Saved: {filepath}[/green]")
+
+    console.print(f"\n[green]Done! {len(papers)} paper(s) saved to {out}/[/green]")
+
+
 @main.command("missing-reviews")
 @click.option(
     "--send-email",
@@ -367,21 +506,42 @@ def nudge_reviewers(dry_run: bool, post_comment: bool):
             console.print("[blue]Done posting comments.[/blue]")
 
 
-@main.command("pull-reviews")
+@main.command("pull-reviews-ac")
 @click.option(
     "--output-dir", "-o",
     type=click.Path(),
     default="./reviews",
     help="Directory to save review markdown files (default: ./reviews).",
 )
-def pull_reviews(output_dir: str):
+@click.option(
+    "--paper", "-p",
+    "paper_filter",
+    type=str,
+    default=None,
+    help="Comma-separated paper numbers to pull (e.g. 42,57). Pulls all if omitted.",
+)
+def pull_reviews(output_dir: str, paper_filter: str):
     """Pull reviews for your AC papers and save as markdown files."""
-    from .openreview_client import get_paper_reviews
+    from .openreview_client import get_paper_reviews, filter_paper_ids_by_number
 
     setup = _openreview_ac_setup()
     if setup is None:
         return
     client, user_id, venue_id, paper_ids = setup
+
+    if paper_filter:
+        requested = {int(n.strip()) for n in paper_filter.split(",") if n.strip()}
+        paper_ids, unknown = filter_paper_ids_by_number(client, paper_ids, requested)
+        for num in sorted(unknown):
+            console.print(f"[yellow]Warning: paper #{num} not found in your assignments.[/yellow]")
+        if not paper_ids:
+            console.print("[yellow]No matching papers found.[/yellow]")
+            return
+    else:
+        paper_ids = _select_papers(client, paper_ids)
+        if not paper_ids:
+            console.print("[yellow]No papers selected.[/yellow]")
+            return
 
     console.print("[blue]Pulling reviews...[/blue]")
     papers = get_paper_reviews(client, venue_id, paper_ids)
