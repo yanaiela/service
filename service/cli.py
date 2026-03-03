@@ -546,7 +546,8 @@ def pull_reviews(output_dir: str, paper_filter: str):
     console.print("[blue]Pulling reviews...[/blue]")
     papers = get_paper_reviews(client, venue_id, paper_ids)
 
-    out = Path(output_dir)
+    safe_venue = re.sub(r"[^\w\s-]", "_", venue_id).strip("_")
+    out = Path(output_dir) / safe_venue
     out.mkdir(parents=True, exist_ok=True)
 
     for paper in papers:
